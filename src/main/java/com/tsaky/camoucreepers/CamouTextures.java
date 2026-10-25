@@ -16,6 +16,7 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
+import net.minecraft.world.phys.AABB;
 import com.mojang.blaze3d.platform.NativeImage;
 import org.jetbrains.annotations.Nullable;
 
@@ -48,6 +49,8 @@ public final class CamouTextures {
         long resolvedAt;
         long lastUsed;
         Entry entry;
+        /** Last skin that was actually found; kept while the creeper falls or crosses gaps. */
+        Entry lastGood;
     }
 
     /** Cached marker for "this block cannot be used as camouflage". */
@@ -58,6 +61,8 @@ public final class CamouTextures {
     private static final int REFRESH_TICKS = 10;
     private static final int MEMO_TTL_TICKS = 200;
     private static final int MAX_SCALE = 4;
+    /** How far down a creeper that has never touched ground looks for something to imitate. */
+    private static final int MAX_SEARCH_DOWN = 12;
 
     private static final Map<Key, Entry> CACHE = new HashMap<>();
     /** Skins that are no longer cached but may still be needed by draw calls queued this frame. */
@@ -89,9 +94,15 @@ public final class CamouTextures {
             return memo.entry;
         }
 
-        Entry entry = lookup(level, feet);
+        Entry entry = findSkin(level, creeper);
+        if (memo != null && MEMOS.get(id) != memo) {
+            memo = null; // the cache was flushed while resolving; its old skins are about to be freed
+        }
+        if (entry == null && memo != null) {
+            entry = memo.lastGood; // falling or over a gap: keep the skin it already had
+        }
         if (entry == null) {
-            entry = lookup(level, feet.below());
+            entry = searchDown(level, feet); // spawned/loaded in mid-air
         }
 
         // Created after resolving: resolving may flush the cache, which clears all memos.
@@ -100,7 +111,64 @@ public final class CamouTextures {
         memo.resolvedAt = now;
         memo.lastUsed = now;
         memo.entry = entry;
+        if (entry != null) {
+            memo.lastGood = entry;
+        }
         return entry;
+    }
+
+    /**
+     * What the creeper is standing in/on: the block at its feet (carpet, slab, snow...), otherwise the blocks
+     * under its whole footprint, biggest overlap first. Using the footprint rather than just the centre means
+     * a creeper on the edge of a block still counts as standing on it.
+     */
+    @Nullable
+    private static Entry findSkin(Level level, Creeper creeper) {
+        Entry entry = lookup(level, creeper.blockPosition());
+        if (entry != null) {
+            return entry;
+        }
+
+        AABB box = creeper.getBoundingBox();
+        int y = Mth.floor(box.minY - 0.01D);
+        int minX = Mth.floor(box.minX);
+        int maxX = Mth.floor(box.maxX - 1.0E-4D);
+        int minZ = Mth.floor(box.minZ);
+        int maxZ = Mth.floor(box.maxZ - 1.0E-4D);
+
+        List<BlockPos> cells = new ArrayList<>(4);
+        List<Double> overlaps = new ArrayList<>(4);
+        for (int x = minX; x <= maxX; x++) {
+            for (int z = minZ; z <= maxZ; z++) {
+                double ox = Math.min(box.maxX, x + 1) - Math.max(box.minX, x);
+                double oz = Math.min(box.maxZ, z + 1) - Math.max(box.minZ, z);
+                double area = Math.max(0D, ox) * Math.max(0D, oz);
+                int at = 0;
+                while (at < overlaps.size() && overlaps.get(at) >= area) {
+                    at++;
+                }
+                overlaps.add(at, area);
+                cells.add(at, new BlockPos(x, y, z));
+            }
+        }
+        for (BlockPos cell : cells) {
+            entry = lookup(level, cell);
+            if (entry != null) {
+                return entry;
+            }
+        }
+        return null;
+    }
+
+    @Nullable
+    private static Entry searchDown(Level level, BlockPos feet) {
+        for (int i = 2; i <= MAX_SEARCH_DOWN; i++) {
+            Entry entry = lookup(level, feet.below(i));
+            if (entry != null) {
+                return entry;
+            }
+        }
+        return null;
     }
 
     /** Resource reload: drop everything immediately, packs may have changed the textures. */
@@ -207,7 +275,9 @@ public final class CamouTextures {
             if (TextureMath.coverage(tile) < TextureMath.MIN_COVERAGE) {
                 return UNUSABLE; // flowers, panes, rails and so on: let the caller look at the block below
             }
-            boolean translucent = TextureMath.hasPartialAlpha(tile);
+            TextureMath.Cleaned cleaned = TextureMath.clean(tile);
+            tile = cleaned.pixels();
+            boolean translucent = cleaned.translucent();
 
             loadOverlay(resources);
             int[] composed = TextureMath.compose(tile, tileSize, scale, overlay, overlayW, overlayH, tint);
