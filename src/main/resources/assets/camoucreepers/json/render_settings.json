@@ -1,5 +1,5 @@
 {
-  "_comment": "Block ids ('minecraft:rail') or block tags ('#minecraft:rails'). ignore_list: blocks a creeper will not imitate (it looks at the block below instead). override_list: [block, block whose texture to use instead]. do_not_replace_side_with_top_list: blocks whose side texture must NOT be swapped for the _top texture. Unknown ids are skipped.",
+  "_comment": "Block ids ('minecraft:rail') or block tags ('#minecraft:rails'). ignore_list: blocks a creeper will not imitate (it looks at the block below instead). override_list: [block, block whose texture to use instead]. do_not_replace_side_with_top_list: blocks whose side texture must NOT be swapped for the _top texture. spiky_list: blocks with spines (cactus): the creeper is solid and the spines stick out of it; other blocks with holes (leaves...) stay see-through. Unknown ids are skipped.",
 
   "ignore_list": [
     "minecraft:rail",
@@ -350,5 +350,9 @@
     "minecraft:respawn_anchor",
     "minecraft:beehive",
     "minecraft:bee_nest"
+  ],
+
+  "spiky_list": [
+    "minecraft:cactus"
   ]
 }

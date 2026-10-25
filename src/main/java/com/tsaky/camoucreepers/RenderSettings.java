@@ -23,11 +23,12 @@ import java.util.Set;
 
 /**
  * Loads {@code assets/camoucreepers/json/render_settings.json} (through the resource manager,
- * so a resource pack can override it) and answers the three questions the renderer asks:
+ * so a resource pack can override it) and answers the questions the renderer asks:
  * <ul>
  *   <li>should this block be ignored (the creeper looks at the block below instead)?</li>
  *   <li>should this block borrow another block's texture?</li>
  *   <li>should {@code _side}/{@code _front} textures be swapped for the {@code _top} one?</li>
+ *   <li>is this block spiky (cactus): solid creeper body, with its spines sticking out?</li>
  * </ul>
  * Entries are block ids ({@code minecraft:rail}) or block tags ({@code #minecraft:rails}).
  * Unknown ids (e.g. a mod that is not installed) are skipped without affecting anything else.
@@ -44,8 +45,9 @@ final class RenderSettings {
     private record Settings(
             Set<Block> ignored, List<TagKey<Block>> ignoredTags,
             Map<Block, Block> overrides,
-            Set<Block> keepSide, List<TagKey<Block>> keepSideTags) {
-        static final Settings EMPTY = new Settings(Set.of(), List.of(), Map.of(), Set.of(), List.of());
+            Set<Block> keepSide, List<TagKey<Block>> keepSideTags,
+            Set<Block> spiky, List<TagKey<Block>> spikyTags) {
+        static final Settings EMPTY = new Settings(Set.of(), List.of(), Map.of(), Set.of(), List.of(), Set.of(), List.of());
     }
 
     static void load(ResourceManager resourceManager) {
@@ -54,11 +56,14 @@ final class RenderSettings {
         Map<Block, Block> overrides = new HashMap<>();
         Set<Block> keepSide = new HashSet<>();
         List<TagKey<Block>> keepSideTags = new ArrayList<>();
+        Set<Block> spiky = new HashSet<>();
+        List<TagKey<Block>> spikyTags = new ArrayList<>();
 
         try (Reader reader = resourceManager.openAsReader(FILE)) {
             JsonObject root = JsonParser.parseReader(reader).getAsJsonObject();
             readBlockList(root, "ignore_list", ignored, ignoredTags);
             readBlockList(root, "do_not_replace_side_with_top_list", keepSide, keepSideTags);
+            readBlockList(root, "spiky_list", spiky, spikyTags);
 
             if (root.has("override_list")) {
                 for (JsonElement element : root.getAsJsonArray("override_list")) {
@@ -74,7 +79,7 @@ final class RenderSettings {
             CamouCreepers.LOGGER.error("Could not read {}; using empty settings", FILE, e);
         }
 
-        current = new Settings(ignored, ignoredTags, overrides, keepSide, keepSideTags);
+        current = new Settings(ignored, ignoredTags, overrides, keepSide, keepSideTags, spiky, spikyTags);
         CamouCreepers.LOGGER.info("Camouflaged Creepers: ignoring {} blocks + {} tags, overriding {} blocks",
                 ignored.size(), ignoredTags.size(), overrides.size());
     }
@@ -124,6 +129,23 @@ final class RenderSettings {
     /** The block whose texture should be used instead of this one, or null. */
     static Block getOverride(Block block) {
         return current.overrides.get(block);
+    }
+
+    /**
+     * Spiky blocks (cactus): the creeper is solid (no see-through gaps) and the block's spines stick out of it.
+     * Their side texture is always used, since that is the one with the spines.
+     */
+    static boolean isSpiky(BlockState state) {
+        Settings s = current;
+        if (s.spiky.contains(state.getBlock())) {
+            return true;
+        }
+        for (TagKey<Block> tag : s.spikyTags) {
+            if (state.is(tag)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** Whether {@code _side}/{@code _front} sprites of this block should be swapped for the {@code _top} texture. */

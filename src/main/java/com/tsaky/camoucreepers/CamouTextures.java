@@ -37,8 +37,15 @@ import java.util.UUID;
  * the cache was a linear list; and HD block textures were cropped to their top-left 16x16.
  */
 public final class CamouTextures {
-    /** Skin plus whether it needs alpha blending. */
-    public record Entry(ResourceLocation location, boolean translucent, DynamicTexture texture) {
+    /**
+     * Skin plus whether it needs alpha blending. {@code spikes}/{@code spikeTexture} are the optional skin of the
+     * spine layer (cactus); null for blocks without spines.
+     */
+    public record Entry(ResourceLocation location, boolean translucent, DynamicTexture texture,
+                        @Nullable ResourceLocation spikes, @Nullable DynamicTexture spikeTexture) {
+    }
+
+    private record Uploaded(ResourceLocation location, DynamicTexture texture) {
     }
 
     private record Key(BlockState state, int tint) {
@@ -54,7 +61,7 @@ public final class CamouTextures {
     }
 
     /** Cached marker for "this block cannot be used as camouflage". */
-    private static final Entry UNUSABLE = new Entry(null, false, null);
+    private static final Entry UNUSABLE = new Entry(null, false, null, null, null);
 
     private static final int MAX_CACHED = 512;
     /** How often (ticks) a creeper re-checks the block under it even if it has not moved. */
@@ -252,7 +259,6 @@ public final class CamouTextures {
     // ------------------------------------------------------------------ creation
 
     private static Entry create(BlockState state, Level level, BlockPos pos, int tint, boolean overridden) {
-        NativeImage skin = null;
         try {
             Minecraft mc = Minecraft.getInstance();
             ResourceManager resources = mc.getResourceManager();
@@ -275,35 +281,54 @@ public final class CamouTextures {
             if (TextureMath.coverage(tile) < TextureMath.MIN_COVERAGE) {
                 return UNUSABLE; // flowers, panes, rails and so on: let the caller look at the block below
             }
-            TextureMath.Cleaned cleaned = TextureMath.clean(tile);
+            // Spiky blocks (cactus) get a solid body plus spines sticking out; everything else (leaves...) keeps its holes.
+            TextureMath.Cleaned cleaned = RenderSettings.isSpiky(state)
+                    ? TextureMath.cleanSpiky(tile, tileSize)
+                    : TextureMath.clean(tile);
             tile = cleaned.pixels();
-            boolean translucent = cleaned.translucent();
 
             loadOverlay(resources);
             int[] composed = TextureMath.compose(tile, tileSize, scale, overlay, overlayW, overlayH, tint);
 
             int skinW = TextureMath.SKIN_WIDTH * scale;
             int skinH = TextureMath.SKIN_HEIGHT * scale;
-            skin = new NativeImage(NativeImage.Format.RGBA, skinW, skinH, false);
-            for (int y = 0; y < skinH; y++) {
-                for (int x = 0; x < skinW; x++) {
-                    skin.setPixelRGBA(x, y, composed[y * skinW + x]);
+            Uploaded main = upload(mc, composed, skinW, skinH);
+            Uploaded spikes = null;
+            if (cleaned.spikes() != null) {
+                try {
+                    int[] spikePixels = TextureMath.spikeSkin(cleaned.spikes(), tileSize, scale, tint);
+                    spikes = upload(mc, spikePixels, skinW, skinH);
+                } catch (RuntimeException e) {
+                    release(new Entry(main.location(), false, main.texture(), null, null));
+                    throw e;
                 }
             }
-
-            DynamicTexture texture = new DynamicTexture(skin);
-            skin = null; // owned by the texture now
-            ResourceLocation location = ResourceLocation.fromNamespaceAndPath(
-                    CamouCreepers.MOD_ID, "dynamic/skin_" + (counter++));
-            mc.getTextureManager().register(location, texture);
-            return new Entry(location, translucent, texture);
+            return new Entry(main.location(), cleaned.translucent(), main.texture(),
+                    spikes == null ? null : spikes.location(), spikes == null ? null : spikes.texture());
         } catch (Exception e) {
             CamouCreepers.LOGGER.warn("Could not build a camouflage texture for {}", state, e);
-            if (skin != null) {
-                skin.close();
-            }
             return UNUSABLE;
         }
+    }
+
+    /** Uploads ABGR pixels as a new dynamic texture. */
+    private static Uploaded upload(Minecraft mc, int[] pixels, int width, int height) {
+        NativeImage image = new NativeImage(NativeImage.Format.RGBA, width, height, false);
+        try {
+            for (int y = 0; y < height; y++) {
+                for (int x = 0; x < width; x++) {
+                    image.setPixelRGBA(x, y, pixels[y * width + x]);
+                }
+            }
+        } catch (RuntimeException e) {
+            image.close();
+            throw e;
+        }
+        DynamicTexture texture = new DynamicTexture(image); // owns the image now
+        ResourceLocation location = ResourceLocation.fromNamespaceAndPath(
+                CamouCreepers.MOD_ID, "dynamic/skin_" + (counter++));
+        mc.getTextureManager().register(location, texture);
+        return new Uploaded(location, texture);
     }
 
     /**
@@ -329,7 +354,7 @@ public final class CamouTextures {
         }
 
         String path = name.getPath();
-        if (RenderSettings.shouldReplaceSideWithTop(state)) {
+        if (!RenderSettings.isSpiky(state) && RenderSettings.shouldReplaceSideWithTop(state)) {
             String top = topVariant(path);
             if (top != null) {
                 NativeImage image = readTexture(resources, name.getNamespace(), top);
@@ -415,15 +440,22 @@ public final class CamouTextures {
     }
 
     private static void release(Entry entry) {
+        release(entry.location(), entry.texture());
+        if (entry.spikes() != null) {
+            release(entry.spikes(), entry.spikeTexture());
+        }
+    }
+
+    private static void release(ResourceLocation location, DynamicTexture texture) {
         TextureManager textures = Minecraft.getInstance().getTextureManager();
         try {
-            textures.release(entry.location());
+            textures.release(location);
         } catch (RuntimeException ignored) {
             // already gone
         }
         try {
-            if (entry.texture().getPixels() != null) {
-                entry.texture().close();
+            if (texture.getPixels() != null) {
+                texture.close();
             }
         } catch (RuntimeException ignored) {
             // already closed by the texture manager

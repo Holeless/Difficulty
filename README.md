@@ -28,15 +28,22 @@ texture, and which blocks keep their side texture instead of the `_top` one. Ent
 block ids (`minecraft:rail`) or block tags (`#minecraft:rails`). Unknown ids are skipped, so
 you can list blocks from mods that may not be installed. A resource pack can override this file.
 
+## 3.1.1
+
+* Leaves (and every other block with see-through gaps) are see-through again, like in 3.0.0. The gap
+  filling from 3.1.0 now only applies to blocks in `spiky_list`.
+* Cactus creepers: solid (no transparent holes), built from the cactus' side texture, with the cactus
+  spines sticking out of the creeper (a slightly larger second layer that only draws the spine pixels).
+  New `spiky_list` in `render_settings.json` (default: `minecraft:cactus`).
+
 ## 3.1.0
 
 * Creepers no longer revert to the vanilla skin while falling or crossing gaps: they keep their last
   camouflage, and one that starts in mid-air looks for a block below it.
 * Standing on the edge of a block now counts: the blocks under the creeper's whole footprint are
   checked (largest overlap first), not just the one under its centre.
-* 3D / cut-out blocks (cactus, leaves...): stray semi-transparent pixels no longer flip the creeper
-  into translucent rendering (which broke face sorting), and see-through gaps are filled with a darker
-  shade of the block's colour so the creeper stays solid. Real glass/ice/water stay translucent.
+* Cut-out blocks (cactus, leaves...): stray semi-transparent pixels no longer flip the creeper
+  into translucent rendering (which broke face sorting). Real glass/ice/water stay translucent.
 * The face is now a dark shade of the block's own average colour (and slightly stronger) instead of
   plain black, so it blends in more naturally.
 

@@ -17,8 +17,6 @@ final class TextureMath {
     static final float FACE_SHADE = 0.2F;
     /** The original overlay is faint (max ~57% black); make the face a bit stronger now that it is coloured. */
     static final float FACE_ALPHA_BOOST = 1.35F;
-    /** Holes in a texture (leaf gaps...) are filled with the average colour times this. */
-    static final float HOLE_SHADE = 0.55F;
     /** If at least this fraction of pixels is semi-transparent the texture is truly translucent (glass, ice). */
     static final float TRANSLUCENT_FRACTION = 0.25F;
 
@@ -77,18 +75,22 @@ final class TextureMath {
         return visible / (float) tile.length;
     }
 
-    /** A tile after alpha clean-up. */
-    record Cleaned(int[] pixels, boolean translucent) {
+    /**
+     * A tile after alpha clean-up.
+     *
+     * @param spikes spikes that should stick out of the creeper (same size as {@code pixels}, transparent
+     *               everywhere except the spike pixels), or null when the block has none
+     */
+    record Cleaned(int[] pixels, boolean translucent, int[] spikes) {
     }
 
     /**
-     * Makes a block tile safe to wrap around a creeper:
+     * Makes a normal block tile safe to wrap around a creeper:
      * <ul>
-     *   <li>If only a few pixels are semi-transparent (anti-aliased spines, stray pixels) they are snapped to
+     *   <li>If only a few pixels are semi-transparent (anti-aliased edges, stray pixels) they are snapped to
      *       fully opaque or to a hole. Otherwise a couple of odd pixels would switch the whole creeper to
      *       translucent rendering, which sorts its faces wrongly and looks glitchy.</li>
-     *   <li>Holes (leaf gaps, cut-out 3D blocks like cacti) are filled with a darker shade of the block's own
-     *       colour, so the creeper stays solid instead of full of see-through gaps.</li>
+     *   <li>Holes (leaf gaps...) are kept: the creeper is see-through there, like the block itself.</li>
      *   <li>Genuinely translucent textures (stained glass, ice, water) are left as they are.</li>
      * </ul>
      */
@@ -101,7 +103,7 @@ final class TextureMath {
             }
         }
         if (partial / (float) tile.length >= TRANSLUCENT_FRACTION) {
-            return new Cleaned(tile.clone(), true);
+            return new Cleaned(tile.clone(), true, null);
         }
 
         int[] out = tile.clone();
@@ -112,13 +114,83 @@ final class TextureMath {
             }
             out[i] = a >= 128 ? (0xFF000000 | (out[i] & 0xFFFFFF)) : 0;
         }
-        int hole = shade(averageColor(out), HOLE_SHADE);
-        for (int i = 0; i < out.length; i++) {
-            if ((out[i] >>> 24) == 0) {
-                out[i] = hole;
+        return new Cleaned(out, false, null);
+    }
+
+    /**
+     * Cleans the tile of a spiky block (cactus). Its texture is a solid body with a see-through margin
+     * where single spine pixels poke out. Here the spines are split off into their own tile (they are drawn
+     * as a slightly larger second layer so they stick out of the creeper), and the gaps they leave are filled
+     * with the colour of the nearest body pixel, so the creeper itself is completely solid.
+     *
+     * <p>A spine is any opaque pixel in a column or row that is mostly empty; this works at any resolution.
+     *
+     * @param size the tile is {@code size x size}
+     */
+    static Cleaned cleanSpiky(int[] tile, int size) {
+        int[] colSolid = new int[size];
+        int[] rowSolid = new int[size];
+        for (int y = 0; y < size; y++) {
+            for (int x = 0; x < size; x++) {
+                if ((tile[y * size + x] >>> 24) >= 128) {
+                    colSolid[x]++;
+                    rowSolid[y]++;
+                }
             }
         }
-        return new Cleaned(out, false);
+
+        int[] body = new int[tile.length];
+        int[] spikes = new int[tile.length];
+        boolean anyBody = false;
+        boolean anySpike = false;
+        for (int y = 0; y < size; y++) {
+            for (int x = 0; x < size; x++) {
+                int i = y * size + x;
+                if ((tile[i] >>> 24) < 128) {
+                    continue;
+                }
+                int opaque = 0xFF000000 | (tile[i] & 0xFFFFFF);
+                if (colSolid[x] * 2 < size || rowSolid[y] * 2 < size) {
+                    spikes[i] = opaque;
+                    anySpike = true;
+                } else {
+                    body[i] = opaque;
+                    anyBody = true;
+                }
+            }
+        }
+        if (!anyBody) {
+            return clean(tile); // nothing solid to build a body from
+        }
+        fillHoles(body, size);
+        return new Cleaned(body, false, anySpike ? spikes : null);
+    }
+
+    /** Fills every transparent pixel with the colour of the nearest opaque one (the tile wraps around). */
+    private static void fillHoles(int[] px, int size) {
+        int[] queue = new int[px.length];
+        int head = 0, tail = 0;
+        for (int i = 0; i < px.length; i++) {
+            if ((px[i] >>> 24) != 0) {
+                queue[tail++] = i;
+            }
+        }
+        while (head < tail) {
+            int i = queue[head++];
+            int x = i % size, y = i / size;
+            int[] next = {
+                    y * size + (x + 1) % size,
+                    y * size + (x + size - 1) % size,
+                    ((y + 1) % size) * size + x,
+                    ((y + size - 1) % size) * size + x
+            };
+            for (int j : next) {
+                if ((px[j] >>> 24) == 0) {
+                    px[j] = px[i];
+                    queue[tail++] = j;
+                }
+            }
+        }
     }
 
     /** Alpha-weighted average colour of a tile, as opaque ABGR. */
@@ -190,6 +262,42 @@ final class TextureMath {
                     top = (oa << 24) | faceColor;
                 }
                 out[y * w + x] = over(top, base, tr, tg, tb);
+            }
+        }
+        return out;
+    }
+
+    /**
+     * Builds the skin of the spike layer: transparent except for the spine pixels. The tile is not just
+     * repeated; its pixels are scattered with a shear (a bijection on 16x16 blocks, so the spine density is
+     * exactly the texture's) so every face of the creeper gets spines instead of only the faces that happen to
+     * line up with the tile's margin columns.
+     *
+     * @return skin pixels, {@code (64*scale) * (32*scale)} ABGR ints
+     */
+    static int[] spikeSkin(int[] spikeTile, int tileSize, int scale, int tint) {
+        int w = SKIN_WIDTH * scale;
+        int h = SKIN_HEIGHT * scale;
+        float tr = 1F, tg = 1F, tb = 1F;
+        if (tint != -1) {
+            tr = ((tint >> 16) & 0xFF) / 255F;
+            tg = ((tint >> 8) & 0xFF) / 255F;
+            tb = (tint & 0xFF) / 255F;
+        }
+        int[] out = new int[w * h];
+        for (int y = 0; y < h; y++) {
+            for (int x = 0; x < w; x++) {
+                int bx = x / scale, by = y / scale;
+                int tx = Math.floorMod(bx + 5 * by, 16) * scale + x % scale;
+                int ty = Math.floorMod(3 * bx + 2 * by, 16) * scale + y % scale;
+                int p = spikeTile[ty * tileSize + tx];
+                if ((p >>> 24) == 0) {
+                    continue;
+                }
+                out[y * w + x] = (p & 0xFF000000)
+                        | (clamp(((p >> 16) & 0xFF) * tb) << 16)
+                        | (clamp(((p >> 8) & 0xFF) * tg) << 8)
+                        | clamp((p & 0xFF) * tr);
             }
         }
         return out;

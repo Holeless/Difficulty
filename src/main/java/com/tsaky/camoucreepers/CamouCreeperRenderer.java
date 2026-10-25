@@ -1,5 +1,6 @@
 package com.tsaky.camoucreepers;
 
+import net.minecraft.client.model.CreeperModel;
 import net.minecraft.client.renderer.RenderType;
 import net.minecraft.client.renderer.entity.CreeperRenderer;
 import net.minecraft.client.renderer.entity.EntityRendererProvider;
@@ -13,6 +14,7 @@ import net.minecraft.world.entity.monster.Creeper;
 public class CamouCreeperRenderer extends CreeperRenderer {
     public CamouCreeperRenderer(EntityRendererProvider.Context context) {
         super(context);
+        this.addLayer(new CamouSpikeLayer(this, new CreeperModel<>(context.bakeLayer(CamouCreepers.SPIKE_LAYER))));
     }
 
     @Override
