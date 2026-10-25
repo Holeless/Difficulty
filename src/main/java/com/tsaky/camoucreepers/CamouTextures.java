@@ -29,18 +29,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
-/**
- * Builds, caches and frees the camouflage skins. Client render thread only.
- *
- * <p>Compared with the 1.16 version this fixes: skins were never freed or invalidated on a
- * resource reload; failed lookups were not cached, so PNGs were re-read from disk every frame;
- * the cache was a linear list; and HD block textures were cropped to their top-left 16x16.
- */
 public final class CamouTextures {
-    /**
-     * Skin plus whether it needs alpha blending. {@code spikes}/{@code spikeTexture} are the optional skin of the
-     * spine layer (cactus); null for blocks without spines.
-     */
     public record Entry(ResourceLocation location, boolean translucent, DynamicTexture texture,
                         @Nullable ResourceLocation spikes, @Nullable DynamicTexture spikeTexture) {
     }
@@ -56,23 +45,22 @@ public final class CamouTextures {
         long resolvedAt;
         long lastUsed;
         Entry entry;
-        /** Last skin that was actually found; kept while the creeper falls or crosses gaps. */
+
         Entry lastGood;
     }
 
-    /** Cached marker for "this block cannot be used as camouflage". */
     private static final Entry UNUSABLE = new Entry(null, false, null, null, null);
 
     private static final int MAX_CACHED = 512;
-    /** How often (ticks) a creeper re-checks the block under it even if it has not moved. */
+
     private static final int REFRESH_TICKS = 10;
     private static final int MEMO_TTL_TICKS = 200;
     private static final int MAX_SCALE = 4;
-    /** How far down a creeper that has never touched ground looks for something to imitate. */
+
     private static final int MAX_SEARCH_DOWN = 12;
 
     private static final Map<Key, Entry> CACHE = new HashMap<>();
-    /** Skins that are no longer cached but may still be needed by draw calls queued this frame. */
+
     private static final List<Entry> RETIRED = new ArrayList<>();
     private static final Map<UUID, Memo> MEMOS = new HashMap<>();
 
@@ -85,9 +73,6 @@ public final class CamouTextures {
     private CamouTextures() {
     }
 
-    // ------------------------------------------------------------------ public API
-
-    /** The camouflage skin for this creeper, or null to use the vanilla skin. */
     @Nullable
     public static Entry forCreeper(Creeper creeper) {
         Level level = creeper.level();
@@ -103,16 +88,15 @@ public final class CamouTextures {
 
         Entry entry = findSkin(level, creeper);
         if (memo != null && MEMOS.get(id) != memo) {
-            memo = null; // the cache was flushed while resolving; its old skins are about to be freed
+            memo = null;
         }
         if (entry == null && memo != null) {
-            entry = memo.lastGood; // falling or over a gap: keep the skin it already had
+            entry = memo.lastGood;
         }
         if (entry == null) {
-            entry = searchDown(level, feet); // spawned/loaded in mid-air
+            entry = searchDown(level, feet);
         }
 
-        // Created after resolving: resolving may flush the cache, which clears all memos.
         memo = MEMOS.computeIfAbsent(id, k -> new Memo());
         memo.feet = feet;
         memo.resolvedAt = now;
@@ -124,11 +108,6 @@ public final class CamouTextures {
         return entry;
     }
 
-    /**
-     * What the creeper is standing in/on: the block at its feet (carpet, slab, snow...), otherwise the blocks
-     * under its whole footprint, biggest overlap first. Using the footprint rather than just the centre means
-     * a creeper on the edge of a block still counts as standing on it.
-     */
     @Nullable
     private static Entry findSkin(Level level, Creeper creeper) {
         Entry entry = lookup(level, creeper.blockPosition());
@@ -178,7 +157,6 @@ public final class CamouTextures {
         return null;
     }
 
-    /** Resource reload: drop everything immediately, packs may have changed the textures. */
     public static void clearAll() {
         MEMOS.clear();
         for (Entry entry : CACHE.values()) {
@@ -195,7 +173,6 @@ public final class CamouTextures {
         overlayLoaded = false;
     }
 
-    /** Called every client tick (between frames, so retired skins are no longer in use). */
     public static void onClientTick() {
         if (!RETIRED.isEmpty()) {
             for (Entry entry : RETIRED) {
@@ -211,8 +188,6 @@ public final class CamouTextures {
             MEMOS.values().removeIf(m -> now - m.lastUsed > MEMO_TTL_TICKS);
         }
     }
-
-    // ------------------------------------------------------------------ lookup
 
     @Nullable
     private static Entry lookup(Level level, BlockPos pos) {
@@ -246,7 +221,6 @@ public final class CamouTextures {
         return state.hasProperty(BlockStateProperties.SNOWY) && state.getValue(BlockStateProperties.SNOWY);
     }
 
-    /** Biome/block tint (grass, foliage, water, mod blocks...) from the game's own block colours; -1 for none. */
     private static int tintFor(BlockState state, Level level, BlockPos pos) {
         try {
             int color = Minecraft.getInstance().getBlockColors().getColor(state, level, pos, 0);
@@ -255,8 +229,6 @@ public final class CamouTextures {
             return -1;
         }
     }
-
-    // ------------------------------------------------------------------ creation
 
     private static Entry create(BlockState state, Level level, BlockPos pos, int tint, boolean overridden) {
         try {
@@ -279,9 +251,9 @@ public final class CamouTextures {
             int tileSize = 16 * scale;
             int[] tile = TextureMath.toTile(pixels, width, height, tileSize);
             if (TextureMath.coverage(tile) < TextureMath.MIN_COVERAGE) {
-                return UNUSABLE; // flowers, panes, rails and so on: let the caller look at the block below
+                return UNUSABLE;
             }
-            // Spiky blocks (cactus) get a solid body plus spines sticking out; everything else (leaves...) keeps its holes.
+
             TextureMath.Cleaned cleaned = RenderSettings.isSpiky(state)
                     ? TextureMath.cleanSpiky(tile, tileSize)
                     : TextureMath.clean(tile);
@@ -311,7 +283,6 @@ public final class CamouTextures {
         }
     }
 
-    /** Uploads ABGR pixels as a new dynamic texture. */
     private static Uploaded upload(Minecraft mc, int[] pixels, int width, int height) {
         NativeImage image = new NativeImage(NativeImage.Format.RGBA, width, height, false);
         try {
@@ -324,27 +295,20 @@ public final class CamouTextures {
             image.close();
             throw e;
         }
-        DynamicTexture texture = new DynamicTexture(image); // owns the image now
+        DynamicTexture texture = new DynamicTexture(image);
         ResourceLocation location = ResourceLocation.fromNamespaceAndPath(
                 CamouCreepers.MOD_ID, "dynamic/skin_" + (counter++));
         mc.getTextureManager().register(location, texture);
         return new Uploaded(location, texture);
     }
 
-    /**
-     * Finds the PNG for the block's sprite. The particle sprite is used because it is the most
-     * representative single texture of a block; for blocks whose sprite is a side/front face the
-     * {@code _top} texture is preferred when it exists.
-     */
     @Nullable
     private static NativeImage loadBlockImage(Minecraft mc, ResourceManager resources, BlockState state,
                                               Level level, BlockPos pos, boolean overridden) throws IOException {
         ResourceLocation name;
         if (isSnowy(state)) {
-            // Snow-covered grass/podzol/mycelium look like snow.
             name = ResourceLocation.withDefaultNamespace("block/snow");
         } else if (state.is(Blocks.GRASS_BLOCK)) {
-            // Grass' particle sprite is plain dirt; use the (grey, biome-tinted) top instead.
             name = ResourceLocation.withDefaultNamespace("block/grass_block_top");
         } else {
             name = spriteName(mc, state, level, pos, overridden);
@@ -374,7 +338,6 @@ public final class CamouTextures {
         return sprite == null ? null : sprite.contents().name();
     }
 
-    /** {@code block/foo_side} -> {@code block/foo_top}, {@code block/foo_front} -> {@code block/foo_top}; else null. */
     @Nullable
     static String topVariant(String path) {
         for (String suffix : new String[]{"_front_on", "_front", "_side"}) {
@@ -426,9 +389,6 @@ public final class CamouTextures {
         }
     }
 
-    // ------------------------------------------------------------------ freeing
-
-    /** Cache is full: forget everything, but free the GPU textures only after this frame. */
     private static void flush() {
         MEMOS.clear();
         for (Entry entry : CACHE.values()) {
@@ -451,14 +411,12 @@ public final class CamouTextures {
         try {
             textures.release(location);
         } catch (RuntimeException ignored) {
-            // already gone
         }
         try {
             if (texture.getPixels() != null) {
                 texture.close();
             }
         } catch (RuntimeException ignored) {
-            // already closed by the texture manager
         }
     }
 }

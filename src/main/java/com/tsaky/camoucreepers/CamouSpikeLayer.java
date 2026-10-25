@@ -11,10 +11,6 @@ import net.minecraft.client.renderer.entity.layers.RenderLayer;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.monster.Creeper;
 
-/**
- * Draws the spines of spiky blocks (cactus) sticking out of the creeper: the creeper model, one pixel
- * bigger, with a skin that is transparent except for the spine pixels.
- */
 final class CamouSpikeLayer extends RenderLayer<Creeper, CreeperModel<Creeper>> {
     private final CreeperModel<Creeper> model;
 
@@ -39,7 +35,6 @@ final class CamouSpikeLayer extends RenderLayer<Creeper, CreeperModel<Creeper>> 
         this.getParentModel().copyPropertiesTo(model);
         model.setupAnim(creeper, limbSwing, limbSwingAmount, ageInTicks, netHeadYaw, headPitch);
 
-        // Same white flash as the creeper itself when it is about to explode.
         float swelling = creeper.getSwelling(partialTick);
         float flash = (int) (swelling * 10.0F) % 2 == 0 ? 0.0F : Mth.clamp(swelling, 0.5F, 1.0F);
 

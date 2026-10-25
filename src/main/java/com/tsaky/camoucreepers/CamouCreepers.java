@@ -16,16 +16,11 @@ import net.neoforged.neoforge.client.event.RegisterClientReloadListenersEvent;
 import net.neoforged.neoforge.common.NeoForge;
 import org.slf4j.Logger;
 
-/**
- * Camouflaged Creepers: creepers take on the texture of the block they stand on.
- * Client-only; it is never loaded on a dedicated server and works on servers without the mod.
- */
 @Mod(value = CamouCreepers.MOD_ID, dist = Dist.CLIENT)
 public class CamouCreepers {
     public static final String MOD_ID = "camoucreepers";
     public static final Logger LOGGER = LogUtils.getLogger();
 
-    /** A creeper model one pixel bigger than normal, used to draw the spines of spiky blocks (cactus). */
     public static final ModelLayerLocation SPIKE_LAYER =
             new ModelLayerLocation(ResourceLocation.fromNamespaceAndPath(MOD_ID, "creeper_spikes"), "main");
 

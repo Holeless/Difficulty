@@ -7,10 +7,6 @@ import net.minecraft.client.renderer.entity.EntityRendererProvider;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.monster.Creeper;
 
-/**
- * Vanilla creeper renderer (so the charged-creeper swirl, swelling and white flash all keep
- * working) with the skin swapped for the one matching the block it is standing on.
- */
 public class CamouCreeperRenderer extends CreeperRenderer {
     public CamouCreeperRenderer(EntityRendererProvider.Context context) {
         super(context);
