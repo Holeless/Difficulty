@@ -1,0 +1,30 @@
+modLoader="javafml"
+loaderVersion="${loader_version_range}"
+license="${mod_license}"
+
+[[mods]]
+modId="${mod_id}"
+version="${mod_version}"
+displayName="${mod_name}"
+credits="Original mod (Forge 1.16.5) by George Tsakiridis (georgetsak)"
+authors="George Tsakiridis (georgetsak); NeoForge 1.21.1 port"
+description='''
+Creepers take on the texture of the block they are standing on.
+Works with vanilla blocks and blocks added by other mods, and respects resource packs
+(including HD ones) and biome tints.
+This is a client-only mod: it can be used on servers that do not have it installed.
+'''
+
+[[dependencies.${mod_id}]]
+    modId="neoforge"
+    type="required"
+    versionRange="[21.1.0,)"
+    ordering="NONE"
+    side="CLIENT"
+
+[[dependencies.${mod_id}]]
+    modId="minecraft"
+    type="required"
+    versionRange="${minecraft_version_range}"
+    ordering="NONE"
+    side="CLIENT"
